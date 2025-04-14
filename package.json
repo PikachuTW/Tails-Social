@@ -1,0 +1,13 @@
+{
+  "name": "Tails-Social",
+  "packageManager": "yarn@4.8.0",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "cheerio": "^1.0.0",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
