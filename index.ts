@@ -20,7 +20,7 @@ const client = new Client({
   ],
 });
 
-client.once('ready', onReady);
-client.once('messageCreate', (message) => onMessageCreate(message.client, message));
+client.on('ready', onReady);
+client.on('messageCreate', (message) => onMessageCreate(message.client, message));
 
 client.login(process.env.DISCORD_TOKEN);

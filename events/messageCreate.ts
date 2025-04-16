@@ -4,7 +4,7 @@ import {
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-const fetchPost = async (link: string) : Promise<EmbedBuilder | undefined> => {
+const fetchFacebookPost = async (link: string) : Promise<EmbedBuilder | undefined> => {
   const response = await axios.get(link);
   const $ = cheerio.load(response.data);
 
@@ -16,8 +16,10 @@ const fetchPost = async (link: string) : Promise<EmbedBuilder | undefined> => {
   if (!title || !url) {
     const redirectUrl = $('meta[property="og:url"]').attr('content');
     if (!redirectUrl) return undefined;
-    return fetchPost(redirectUrl);
+    return fetchFacebookPost(redirectUrl);
   }
+
+  console.log(title, description, image, url);
 
   const embed = new EmbedBuilder()
     .setTitle(title)
@@ -29,18 +31,55 @@ const fetchPost = async (link: string) : Promise<EmbedBuilder | undefined> => {
   return embed;
 };
 
+const handleFacebook = async (message: OmitPartialGroupDMChannel<Message<boolean>>) => {
+  const fbUrlMatch = message.content.match(/https:\/\/www\.facebook\.com\/[^\s]+/);
+  if (!fbUrlMatch) return;
+  const embed = await fetchFacebookPost(fbUrlMatch[0]);
+  if (!embed) return;
+  embed.setFooter({ text: `Facebook | Sent by ${message.author.username}`, iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined });
+  message.reply({ embeds: [embed] });
+};
+
+const fetchYoutubePost = async (link: string): Promise<EmbedBuilder | undefined> => {
+  const response = await axios.get(link);
+
+  const ytMatch = response.data.match(/"urlCanonical":"(.*?)","title":"(.*?)","description":"(.*?)"/);
+  if (!ytMatch) return undefined;
+
+  const thumbnailMatch = response.data.match(/"thumbnail":{"thumbnails":\[\{"url":"(.*?)"/);
+  const thumbnail = thumbnailMatch ? thumbnailMatch[1] : null;
+
+  console.log(thumbnailMatch.length);
+  console.log(thumbnail);
+
+  const embed = new EmbedBuilder()
+    .setTitle(ytMatch[2])
+    .setDescription(ytMatch[3])
+    .setURL(ytMatch[1])
+    .setImage(thumbnail);
+  return embed;
+};
+
+const handleYoutube = async (message: OmitPartialGroupDMChannel<Message<boolean>>) => {
+  const youtubeUrlMatch = message.content.match(/https:\/\/www\.youtube\.com\/channel\/[^\s]+/);
+  if (!youtubeUrlMatch) return;
+  const embed = await fetchYoutubePost(youtubeUrlMatch[0]);
+  if (!embed) return;
+  embed.setFooter({
+    text: `Youtube | Sent by ${message.author.username}`,
+    iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined,
+  });
+  message.reply({ embeds: [embed] });
+};
+
 export default async function onMessageCreate(
   client: Client<true>,
   message: OmitPartialGroupDMChannel<Message<boolean>>,
 ) {
   if (message.author.id === client.user.id) return;
   try {
-    const fbUrlMatch = message.content.match(/https:\/\/www\.facebook\.com\/[^\s]+/);
-    if (!fbUrlMatch || fbUrlMatch.length === 0) return;
-    const embed = await fetchPost(fbUrlMatch[0]);
-    if (!embed) return;
-    embed.setFooter({ text: `Sent by ${message.author.username}`, iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined });
-    message.reply({ embeds: [embed] });
+    await handleFacebook(message);
+    await handleYoutube(message);
   } catch (error) {
     console.error(`error handling facebook url\n${error}`);
     message.reply('出現錯誤，請回報開發人員');
