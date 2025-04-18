@@ -5,6 +5,7 @@
   },
   "rules": {
     "no-console": "off",
-    "semi": "warn"
+    "semi": "warn",
+    "max-classes-per-file": "off"
   }
 }

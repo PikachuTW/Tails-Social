@@ -1,100 +1,121 @@
 import {
-  EmbedBuilder, type Client, type Message, type OmitPartialGroupDMChannel,
+  EmbedBuilder, type Client, type ColorResolvable, type Message, type OmitPartialGroupDMChannel,
 } from 'discord.js';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-const FACEBOOK_URL_REGEX = /https:\/\/www\.facebook\.com\/[^\s]+/;
-const YOUTUBE_URL_REGEX = /https:\/\/www\.youtube\.com\/channel\/[^\s]+/;
-const YOUTUBE_CONTENT_REGEX = /"urlCanonical":"(.*?)","title":"(.*?)","description":"(.*?)"/;
-const YOUTUBE_THUMBNAIL_REGEX = /"thumbnail":{"thumbnails":\[\{"url":"(.*?)"/;
-
-interface MessageStrategy {
-  match: (message: OmitPartialGroupDMChannel<Message<boolean>>) => boolean;
-  handle: (message: OmitPartialGroupDMChannel<Message<boolean>>) => Promise<void>;
+interface FetchedData {
+  title: string;
+  description?: string;
+  url: string;
+  image?: string;
 }
 
-const fetchFacebookPost = async (link: string) : Promise<EmbedBuilder | undefined> => {
-  try {
-    const response = await axios.get(link);
-    const $ = cheerio.load(response.data);
+abstract class BasicStrategy {
+  abstract readonly sourceName: string;
 
-    const description = $('meta[property="og:description"]').attr('content');
-    const title = $('meta[property="og:title"]').attr('content');
-    const image = $('meta[property="og:image"]').attr('content');
-    const url = $('meta[property="og:url"]').attr('content');
+  protected abstract readonly regex: RegExp;
 
-    if (!title || !url) {
-      const redirectUrl = $('meta[property="og:url"]').attr('content');
-      if (!redirectUrl) return undefined;
-      return await fetchFacebookPost(redirectUrl);
+  protected abstract readonly embedColor: ColorResolvable;
+
+  protected abstract fetchData(link: string): Promise<FetchedData | undefined>;
+
+  async handle(message: OmitPartialGroupDMChannel<Message<boolean>>) {
+    const match = message.content.match(this.regex);
+    if (!match) return;
+
+    try {
+      const data = await this.fetchData(match[0]);
+      if (!data) return;
+      const embed = new EmbedBuilder()
+        .setTitle(data.title)
+        .setDescription(data.description ?? null)
+        .setURL(data.url)
+        .setImage(data.image ?? null)
+        .setColor(this.embedColor)
+        .setFooter({
+          text: `${this.sourceName} | Sent by ${message.author.username}`,
+          iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined,
+        });
+      await message.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error(`error in ${this.sourceName}\n${error}`);
+      message.reply('出現錯誤，請回報開發人員');
     }
-
-    console.log(title, description, image, url);
-
-    return new EmbedBuilder()
-      .setTitle(title)
-      .setDescription(description ?? null)
-      .setImage(image ?? null)
-      .setURL(url)
-      .setColor('#0099ff');
-  } catch (error) {
-    console.error(`error fetching youtube post\n${error}`);
-    return undefined;
   }
-};
+}
 
-const facebookStrategy: MessageStrategy = {
-  match: (message) => FACEBOOK_URL_REGEX.test(message.content),
-  handle: async (message) => {
-    const fbUrlMatch = message.content.match(FACEBOOK_URL_REGEX);
-    if (!fbUrlMatch) return;
-    const embed = await fetchFacebookPost(fbUrlMatch[0]);
-    if (!embed) return;
-    embed.setFooter({ text: `Facebook | Sent by ${message.author.username}`, iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined });
-    await message.reply({ embeds: [embed] });
-  },
-};
+class FacebookStrategy extends BasicStrategy {
+  readonly sourceName = 'Facebook';
 
-const fetchYoutubePost = async (link: string): Promise<EmbedBuilder | undefined> => {
-  try {
-    const response = await axios.get(link);
+  protected readonly regex = /https:\/\/www\.facebook\.com\/[^\s]+/;
 
-    const ytMatch = response.data.match(YOUTUBE_CONTENT_REGEX);
-    if (!ytMatch) return undefined;
+  protected readonly embedColor: ColorResolvable = '#1877F2';
 
-    const thumbnailMatch = response.data.match(YOUTUBE_THUMBNAIL_REGEX);
-    const thumbnail = thumbnailMatch ? thumbnailMatch[1] : null;
+  protected async fetchData(link: string): Promise<FetchedData | undefined> {
+    try {
+      const response = await axios.get(link);
+      const $ = cheerio.load(response.data);
 
-    return new EmbedBuilder()
-      .setTitle(ytMatch[2])
-      .setDescription(ytMatch[3])
-      .setURL(ytMatch[1])
-      .setImage(thumbnail);
-  } catch (error) {
-    console.error(`error fetching youtube post\n${error}`);
-    return undefined;
+      const description = $('meta[property="og:description"]').attr('content');
+      const title = $('meta[property="og:title"]').attr('content');
+      const image = $('meta[property="og:image"]').attr('content');
+      const url = $('meta[property="og:url"]').attr('content');
+
+      if (!title || !url) {
+        const redirectUrl = $('meta[property="og:url"]').attr('content');
+        if (!redirectUrl) return undefined;
+        const redirectedData = await this.fetchData(redirectUrl);
+        return redirectedData;
+      }
+
+      return {
+        title, description, url, image,
+      };
+    } catch (error) {
+      console.error(`error fetching ${this.sourceName} post\n${error}`);
+      return undefined;
+    }
   }
-};
+}
 
-const youtubeStrategy: MessageStrategy = {
-  match: (message) => YOUTUBE_URL_REGEX.test(message.content),
-  handle: async (message) => {
-    const youtubeUrlMatch = message.content.match(YOUTUBE_URL_REGEX);
-    if (!youtubeUrlMatch) return;
-    const embed = await fetchYoutubePost(youtubeUrlMatch[0]);
-    if (!embed) return;
-    embed.setFooter({
-      text: `Youtube | Sent by ${message.author.username}`,
-      iconURL: message.member?.avatarURL() ?? message.author.avatarURL() ?? undefined,
-    });
-    await message.reply({ embeds: [embed] });
-  },
-};
+class YoutubeStrategy extends BasicStrategy {
+  readonly sourceName = 'Youtube';
 
-const strategies: MessageStrategy[] = [
-  facebookStrategy,
-  youtubeStrategy,
+  protected readonly regex = /https:\/\/www\.youtube\.com\/channel\/[^\s]+/;
+
+  protected readonly embedColor: ColorResolvable = '#FF0000';
+
+  private static readonly CONTENT_REGEX = /"urlCanonical":"(.*?)","title":"(.*?)","description":"(.*?)"/;
+
+  private static readonly THUMBNAIL_REGEX = /"thumbnail":{"thumbnails":\[\{"url":"(.*?)"/;
+
+  async fetchData(link: string): Promise<FetchedData | undefined> {
+    try {
+      const response = await axios.get(link);
+
+      const ytMatch = response.data.match(YoutubeStrategy.CONTENT_REGEX);
+      if (!ytMatch) return undefined;
+
+      const thumbnailMatch = response.data.match(YoutubeStrategy.THUMBNAIL_REGEX);
+      const thumbnail = thumbnailMatch ? thumbnailMatch[1] : null;
+
+      return {
+        title: ytMatch[2],
+        description: ytMatch[3],
+        url: ytMatch[1],
+        image: thumbnail,
+      };
+    } catch (error) {
+      console.error(`error fetching ${this.sourceName} post\n${error}`);
+      return undefined;
+    }
+  }
+}
+
+const strategies: BasicStrategy[] = [
+  new FacebookStrategy(),
+  new YoutubeStrategy(),
 ];
 
 export default async function onMessageCreate(
@@ -102,14 +123,8 @@ export default async function onMessageCreate(
   message: OmitPartialGroupDMChannel<Message<boolean>>,
 ) {
   if (message.author.id === client.user.id) return;
-  try {
-    strategies.forEach(async (strategy) => {
-      if (strategy.match(message)) {
-        await strategy.handle(message);
-      }
-    });
-  } catch (error) {
-    console.error(`error handling facebook url\n${error}`);
-    message.reply('出現錯誤，請回報開發人員');
-  }
+
+  await Promise.all(
+    strategies.map((strategy) => strategy.handle(message).catch((err) => console.error(`error in ${strategy.sourceName}\n${err}`))),
+  );
 }
